@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<meta charset="UTF-8">
+<html>
+<head>
+<title>WebGL Intro</title>
+<style>
+    html, body {
+        margin: 0;  /* Make sure that there is no margin around the canvas */
+        overflow: hidden;  /* Make sure we don't get scroll bars. */
+    }
+    canvas {
+        display: block; /* The default display, inline, would add a small margin below the canvas */
+    }
+</style>
+
+<!--
+    A 2D WebGL app in which "points" move around in the browser window, bouncing
+    off the edges.  The animation can be paused and restarted by pressing the
+    space key.
+        If the user clicks or clicks-and-drags with the mouse, all of the
+    points head towards the mouse position, except if the user shift-clicks, the
+    positions and velocities of the points are re-initialized.
+-->
+
+<script type="x-shader/x-vertex" id="vshader-source">
+    attribute vec2 a_coords; // vertex position in standard canvas pixel coords
+    attribute vec4 a_color; // vertex color
+    uniform float u_width;   // width of canvas
+    uniform float u_height;  // height of canvas
+    uniform float u_pointSize; 
+    varying vec4 v_color; // varying color to pass to fragment shader
+    void main() {
+        float x,y;  // vertex position in clip coordinates
+        
+        x = a_coords.x/u_width * 2.0 - 1.0;  // convert pixel coords to clip coords
+        y = 1.0 - a_coords.y/u_height * 2.0;
+        
+        gl_Position = vec4(x, y, 0.0, 1.0);
+        gl_PointSize = u_pointSize;
+        v_color = a_color; // pass the color to the fragment shader
+    }
+</script>
+
+<script type="x-shader/x-fragment" id="fshader-source">
+    #ifdef GL_FRAGMENT_PRECISION_HIGH
+       precision highp float;
+    #else
+       precision mediump float;
+    #endif
+    varying vec4 v_color; // varying color from vertex shader
+    void main() {
+        gl_FragColor = v_color;
+    }
+</script>
+
+<script>
+
+"use strict";
+
+var canvas; // The canvas that is used for WebGL drawing; occupies the entire window. 
+var gl;     // The webgl context.
+
+var u_width_loc;        // Location of "width" uniform, which holds the width of the canvas.
+var u_height_loc;       // Location of "height" uniform, which holds the height of the canvas.
+var u_pointSize_loc;    // Location of "pointSize" uniform, which gives the size for point primitives.
+var a_coords_loc;       // Location of the a_coords attribute variable in the shader program;
+                        //    This attribute gives the (x,y) coordinates of the points.
+var a_color_loc;        // Location of the a_color attribute variable in the shader program;
+
+var a_coords_buffer;    // Buffer to hold the values for a_coords (coordinates for the points)
+var a_color_buffer;     // Buffer to hold the values for a_color (colors for the points)
+
+var POINT_COUNT = 30;   // How many points to draw.
+var POINT_SIZE = 64;    // Size in pixel of the square drawn for each point.
+
+var positions = new Float32Array( 2*POINT_COUNT );  // Position data for points.
+var velocities = new Float32Array( 2*POINT_COUNT ); // Velocity data for points.
+var colors = new Float32Array( 4*POINT_COUNT );     // Color data for points (RGBA)
+      // Note: The xy coords for point number i are in positions[2*i],position[2*i+1].
+      // The xy velocity compontents for point number i are in velocities[2*i],velociteis[2*i+1].
+      // Color components for point number i are in colors[4*i], colors[4*i+1], colors[4*i+2], colors[4*i+3].
+      
+var isRunning = true;  // The animation runs when this is true; its value is toggled by the space bar.
+var useColors = true;  // Toggle for using colors.
+var useAlpha = true;   // Toggle for using alpha channel.
+var renderMode = "POINTS"; // Render mode, can be "POINTS" or "TRIANGLES" or "HEPTAGONS"
+
+/**
+ *  Called by init() when the window is first opened, and by frame() to render each frame.
+ */
+function render() {
+
+    gl.clear(gl.COLOR_BUFFER_BIT);  // clear the color buffer before drawing
+
+    // The position data changes for each frame, so we have to send the new values
+    // for the position attribute into the corresponding buffer in the GPU here,
+    // in every frame.
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_coords_buffer);            
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STREAM_DRAW);  
+    gl.vertexAttribPointer(a_coords_loc, 2, gl.FLOAT, false, 0, 0);  
+\
+    if (useColors) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, a_color_buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STREAM_DRAW);
+        gl.vertexAttribPointer(a_color_loc, 4, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(a_color_loc);
+    } else {
+        gl.disableVertexAttribArray(a_color_loc);
+    }
+\
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    
+\
+    if (renderMode === "POINTS") {
+        gl.drawArrays(gl.POINTS, 0, POINT_COUNT);
+    } else if (renderMode === "TRIANGLES") {
+        for (var i = 0; i < POINT_COUNT; i += 3) {
+            gl.drawArrays(gl.TRIANGLES, i, 3);
+        }
+    } else if (renderMode === "HEPTAGONS") {
+        drawHeptagons();
+    }
+    
+    if (gl.getError() != gl.NO_ERROR) {
+        console.log("During render, a GL error has been detected.");
+    }
+} 
+function drawHeptagons() {
+    const heptagonVertexCount = 7;
+    const angleIncrement = 2 * Math.PI / heptagonVertexCount;
+
+    for (let i = 0; i < POINT_COUNT; i++) {
+        const cx = positions[2 * i];
+        const cy = positions[2 * i + 1];
+        const vertices = [];
+        const color = [1.0, 0.0, 0.0, 0.7]; // Red with alpha transparency
+
+        for (let j = 0; j < heptagonVertexCount; j++) {
+            const angle = j * angleIncrement;
+            const x = cx + POINT_SIZE / 2 * Math.cos(angle);
+            const y = cy + POINT_SIZE / 2 * Math.sin(angle);
+            vertices.push(x, y);
+        }
+
+        const vertexBuffer = new Float32Array(vertices);
+        gl.bindBuffer(gl.ARRAY_BUFFER, a_coords_buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, vertexBuffer, gl.STREAM_DRAW);
+        gl.vertexAttribPointer(a_coords_loc, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(a_coords_loc);
+
+        const colorBuffer = new Float32Array(heptagonVertexCount * 4);
+        for (let k = 0; k < heptagonVertexCount; k++) {
+            colorBuffer.set(color, k * 4);
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, a_color_buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, colorBuffer, gl.STREAM_DRAW);
+        gl.vertexAttribPointer(a_color_loc, 4, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(a_color_loc);
+
+        gl.drawArrays(gl.TRIANGLE_FAN, 0, heptagonVertexCount);
+    }
+}
+
+function createData() {
+    for (var i = 0; i < POINT_COUNT; i++) {
+        positions[2*i] = canvas.width/2;
+        positions[2*i+1] = canvas.height/2;
+        var speed = 2 + 4*Math.random();
+        var angle = 2*Math.PI*Math.random();
+        velocities[2*i] = speed*Math.sin(angle);
+        velocities[2*i+1] = speed*Math.cos(angle);
+        
+        colors[4*i] = Math.random();
+        colors[4*i+1] = Math.random();
+        colors[4*i+2] = Math.random();
+        colors[4*i+3] = useAlpha ? Math.random() * 0.5 + 0.5 : 1.0; // Alpha between 0.5 and 1
+    }
+} 
+function updateData() {
+    for (var i = 0; i < POINT_COUNT; i++) {
+       positions[2*i] += velocities[2*i];
+       if ( positions[2*i] < POINT_SIZE/2 && velocities[2*i] < 0) {
+           positions[2*i] += 2*(POINT_SIZE/2 - positions[2*i]);
+           velocities[2*i] = Math.abs(velocities[2*i]);
+       }
+       else if (positions[2*i] > canvas.width - POINT_SIZE/2 && velocities[2*i] > 0){
+           positions[2*i] -= 2*(positions[2*i] - canvas.width + POINT_SIZE/2);
+           velocities[2*i] = - Math.abs(velocities[2*i]);
+       }
+       positions[2*i+1] += velocities[2*i+1];
+       if ( positions[2*i+1] < POINT_SIZE/2  && velocities[2*i+1] < 0) {
+           positions[2*i+1] += 2*(POINT_SIZE/2 - positions[2*i+1]);
+           velocities[2*i+1] = Math.abs(velocities[2*i+1]);
+       }
+       else if (positions[2*i+1] > canvas.height - POINT_SIZE/2  && velocities[2*i+1] > 0){
+           positions[2*i+1] -= 2*(positions[2*i+1] - canvas.height + POINT_SIZE/2);
+           velocities[2*i+1] = - Math.abs(velocities[2*i+1]);
+       }
+    }
+} 
+function doKey(evt) {
+    var key = evt.keyCode;
+    console.log("key: " + key);
+    if (key == 32) {
+        isRunning = !isRunning;
+    }
+    if (key == 67) {
+        useColors = !useColors;
+    }
+    if (key == 65) {
+        useAlpha = !useAlpha;
+        createData();
+    }
+    if (key == 84) {
+        renderMode = renderMode === "POINTS" ? "TRIANGLES" : "POINTS";
+    }
+    if (key == 72) { 
+        renderMode = renderMode === "HEPTAGONS" ? "POINTS" : "HEPTAGONS";
+    }
+}
+
+
+function frame() {
+    if (isRunning) {
+        updateData();
+    }
+    render();
+    requestAnimationFrame(frame);
+}
+
+function init() {
+    canvas = document.createElement("canvas");
+    document.body.appendChild(canvas);
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    window.addEventListener("resize", function() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.uniform1f(u_width_loc, canvas.width);
+        gl.uniform1f(u_height_loc, canvas.height);
+        render();
+    } );
+    window.addEventListener("keydown", doKey );
+    canvas.addEventListener("mousedown", doMouse );
+    gl = canvas.getContext("webgl");
+    if (!gl) {
+        document.body.innerHTML = "<b>WebGL is not available.</b>";
+        return;
+    }
+    gl.viewport(0,0,canvas.width,canvas.height);
+    gl.clearColor(0, 0, 0, 0.5);
+    var vsh = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vsh, document.getElementById("vshader-source").textContent);
+    gl.compileShader(vsh);
+    if (!gl.getShaderParameter(vsh, gl.COMPILE_STATUS)) {
+        document.body.innerHTML = "<b>Error in vertex shader:</b><pre>" + gl.getShaderInfoLog(vsh) + "</pre>";
+        return;
+    }
+    var fsh = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fsh, document.getElementById("fshader-source").textContent);
+    gl.compileShader(fsh);
+    if (!gl.getShaderParameter(fsh, gl.COMPILE_STATUS)) {
+        document.body.innerHTML = "<b>Error in fragment shader:</b><pre>" + gl.getShaderInfoLog(fsh) + "</pre>";
+        return;
+    }
+    var prog = gl.createProgram();
+    gl.attachShader(prog, vsh);
+    gl.attachShader(prog, fsh);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        document.body.innerHTML = "<b>Error in program:</b><pre>" + gl.getProgramInfoLog(prog) + "</pre>";
+        return;
+    }
+    gl.useProgram(prog);
+    
+    u_width_loc = gl.getUniformLocation(prog, "u_width");
+    u_height_loc = gl.getUniformLocation(prog, "u_height");
+    u_pointSize_loc = gl.getUniformLocation(prog, "u_pointSize");
+    gl.uniform1f(u_width_loc, canvas.width);
+    gl.uniform1f(u_height_loc, canvas.height);
+    gl.uniform1f(u_pointSize_loc, POINT_SIZE);
+    
+    a_coords_loc = gl.getAttribLocation(prog, "a_coords");
+    a_color_loc = gl.getAttribLocation(prog, "a_color");
+    
+    a_coords_buffer = gl.createBuffer();
+    a_color_buffer = gl.createBuffer();
+    
+    gl.enableVertexAttribArray(a_coords_loc);
+    
+    createData();
+    requestAnimationFrame(frame);
+}
+
+window.addEventListener("load", init);
+
+var mouseDown = false; // Whether the mouse button is currently down.
+
+function doMouse(evt) {
+    mouseDown = true;
+    if (evt.shiftKey) {
+        createData();
+    }
+    else {
+        var x = evt.clientX;
+        var y = evt.clientY;
+        for (var i = 0; i < POINT_COUNT; i++) {
+            var dx = x - positions[2*i];
+            var dy = y - positions[2*i+1];
+            var dist = Math.sqrt(dx*dx + dy*dy);
+            var speed = Math.sqrt(velocities[2*i]*velocities[2*i] + velocities[2*i+1]*velocities[2*i+1]);
+            if (speed > 0.0001) {
+                velocities[2*i] = speed * dx / dist;
+                velocities[2*i+1] = speed * dy / dist;
+            }
+        }
+    }
+    function endDrag(evt) {
+        mouseDown = false;
+        window.removeEventListener("mouseup", endDrag);
+        window.removeEventListener("mousemove", drag);
+    }
+    function drag(evt) {
+        if (mouseDown) {
+            var x = evt.clientX;
+            var y = evt.clientY;
+            for (var i = 0; i < POINT_COUNT; i++) {
+                var dx = x - positions[2*i];
+                var dy = y - positions[2*i+1];
+                var dist = Math.sqrt(dx*dx + dy*dy);
+                var speed = Math.sqrt(velocities[2*i]*velocities[2*i] + velocities[2*i+1]*velocities[2*i+1]);
+                if (speed > 0.0001) {
+                    velocities[2*i] = speed * dx / dist;
+                    velocities[2*i+1] = speed * dy / dist;
+                }
+            }
+        }
+    }
+    window.addEventListener("mouseup", endDrag);
+    window.addEventListener("mousemove", drag);
+}
+
+</script>
+
+</head>
+<body>
+</body>
+</html>
