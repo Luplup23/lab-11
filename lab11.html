@@ -99,7 +99,7 @@ function render() {
     gl.bindBuffer(gl.ARRAY_BUFFER, a_coords_buffer);            
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STREAM_DRAW);  
     gl.vertexAttribPointer(a_coords_loc, 2, gl.FLOAT, false, 0, 0);  
-\
+
     if (useColors) {
         gl.bindBuffer(gl.ARRAY_BUFFER, a_color_buffer);
         gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STREAM_DRAW);
@@ -108,11 +108,11 @@ function render() {
     } else {
         gl.disableVertexAttribArray(a_color_loc);
     }
-\
+
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     
-\
+
     if (renderMode === "POINTS") {
         gl.drawArrays(gl.POINTS, 0, POINT_COUNT);
     } else if (renderMode === "TRIANGLES") {
